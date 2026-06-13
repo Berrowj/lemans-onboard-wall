@@ -27,6 +27,24 @@
   .cols-ctl { display:flex; align-items:center; gap:6px; color:var(--muted); }
   select { background:var(--panel-2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 8px; }
 
+  /* visual layout picker */
+  .layout-wrap { position: relative; }
+  .layout-btn { background: var(--accent); border-color: var(--accent); color: #05121f; font-weight: 700; }
+  .layout-btn:hover { filter: brightness(1.08); background: var(--accent); }
+  .layout-panel { position: absolute; top: 116%; left: 0; z-index: 40; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; box-shadow: 0 12px 34px rgba(0,0,0,.6); width: max-content; }
+  .layout-panel[hidden] { display: none; }
+  .lp-group { display: flex; align-items: center; gap: 7px; padding: 5px 0; border-bottom: 1px solid #20262f; }
+  .lp-group:last-child { border-bottom: 0; }
+  .lp-lab { width: 26px; color: var(--muted); font-size: 12px; text-align: right; flex: none; }
+  .lp-icon { padding: 3px; background: transparent; border: 1px solid transparent; border-radius: 6px; cursor: pointer; line-height: 0; }
+  .lp-icon:hover { border-color: var(--line); background: var(--panel-2); }
+  .lp-icon.active { border-color: var(--accent); background: rgba(61,169,252,.12); }
+  .lp-mini { display: grid; gap: 2px; width: 42px; height: 30px; }
+  .lp-mini i { background: #5b6675; border-radius: 1px; }
+  .lp-icon:hover .lp-mini i { background: #828fa3; }
+  .lp-icon.active .lp-mini i { background: var(--accent); }
+
   .wall { flex:1; display:grid; gap:var(--gap); padding:var(--gap);
           grid-template-columns:repeat(var(--cols),1fr); grid-auto-rows:1fr; background:#05070a; min-height:0; }
   .wall.empty { display:flex; align-items:center; justify-content:center; }
@@ -69,25 +87,9 @@
   <div class="toolbar">
     <div class="brand">🏁 Le Mans <span>Onboard Wall</span></div>
     <button class="primary" id="addTile" title="Add a tile (then pick a car from its dropdown)">➕ Add tile</button>
-    <div class="cols-ctl"><span>Layout</span>
-      <select id="cols">
-        <optgroup label="Grid">
-          <option value="auto">Auto</option>
-          <option value="1">1</option>
-          <option value="2">2 cols</option>
-          <option value="3" selected>3 cols</option>
-          <option value="4">4 cols</option>
-          <option value="5">5 cols</option>
-          <option value="6">6 cols</option>
-        </optgroup>
-        <optgroup label="Layouts">
-          <option value="twoup">2 · side by side</option>
-          <option value="stack">2 · stacked</option>
-          <option value="side4">4 · big + sidebar</option>
-          <option value="cine6">6 · 1 big + 5</option>
-          <option value="cine7">7 · 1 big + 6</option>
-        </optgroup>
-      </select>
+    <div class="layout-wrap">
+      <button id="layoutBtn" class="layout-btn" title="Choose a window layout">⊞ Layout ▾</button>
+      <div id="layoutPanel" class="layout-panel" hidden></div>
     </div>
     <div class="spacer"></div>
     <button id="full" class="ghost" title="Fullscreen the whole wall">⛶ Fullscreen</button>
@@ -156,7 +158,8 @@
   const CLASS_ORDER = ["Broadcast", "Hypercar", "LMP2", "LMGT3"];
 
   const wall = document.getElementById("wall");
-  const colsSel = document.getElementById("cols");
+  const layoutBtn = document.getElementById("layoutBtn");
+  const layoutPanel = document.getElementById("layoutPanel");
 
   let state = load();
   let slotSeq = state.slots.reduce((m, s) => Math.max(m, s.id), 0) + 1;
@@ -164,17 +167,17 @@
   function load() {
     let s = null;
     try { s = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
-    if (s && Array.isArray(s.slots)) { if (s.cols) colsSel.value = s.cols; return { cols: s.cols || "3", slots: s.slots, over: s.over || {} }; }
-    // first run: seed a starter grid of 6 cars
+    if (s && Array.isArray(s.slots)) { return { layout: s.layout || "auto", slots: s.slots, over: s.over || {} }; }
+    // first run: seed a starter grid of 6 cars in a 3×2
     const seed = ["s-n7-toyota-racing-24-hours-of-le-mans-2026-race-etro6",
       "s-n8-toyota-racing-24-hours-of-le-mans-2026-race-p5nxqp",
       "s-n50-ferrari-af-corse-24-hours-of-le-mans-2026-race-k1jt5",
       "s-n51-ferrari-af-corse-24-hours-of-le-mans-2026-race-iv3zp",
       "s-n20-bmw-m-team-wrt-24-hours-of-le-mans-2026-race-j7eqc",
       "s-n93-peugeot-totalenergies-24-hours-of-le-mans-2026-race-lajxi9"];
-    return { cols: "3", slots: seed.map((slug, i) => ({ id: i + 1, slug, big: false })), over: {} };
+    return { layout: "3x2", slots: seed.map((slug, i) => ({ id: i + 1, slug, big: false })), over: {} };
   }
-  function save() { state.cols = colsSel.value; try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 
   function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
   function carOf(slot) { return carBySlug[slot.slug] || CARS[0]; }
@@ -185,35 +188,97 @@
     return drv;
   }
 
-  // ---- Render ----
-  // Named "feature" layouts using CSS grid-template-areas. Tiles map to the
-  // areas a,b,c… in order; the first (a) is the big one. Anything beyond the
-  // layout's cell count flows underneath.
-  const LAYOUTS = {
-    twoup: { cols: 2, rows: 1, areas: ["a b"] },
-    stack: { cols: 1, rows: 2, areas: ["a", "b"] },
-    side4: { cols: 3, rows: 3, areas: ["a a b", "a a c", "a a d"] },
-    cine6: { cols: 3, rows: 3, areas: ["a a b", "a a c", "d e f"] },
-    cine7: { cols: 4, rows: 3, areas: ["a a a b", "a a a c", "d e f g"] },
-  };
+  // ---- Layouts (visual picker) ----
+  // Each preset is a CSS grid-template-areas arrangement. Tiles fill the cells
+  // a,b,c… in order; where a letter spans multiple cells it's a "big" pane.
+  const PRESETS = [
+    { id: "auto" },                                                   // square-ish grid, any count
+    { id: "1",    cols: 1, rows: 1, areas: ["a"] },
+    { id: "2h",   cols: 2, rows: 1, areas: ["a b"] },                 // 2 side by side
+    { id: "2v",   cols: 1, rows: 2, areas: ["a", "b"] },              // 2 stacked
+    { id: "1+2",  cols: 2, rows: 2, areas: ["a b", "a c"] },          // 1 big + 2 stacked
+    { id: "3h",   cols: 3, rows: 1, areas: ["a b c"] },               // 3 across
+    { id: "3v",   cols: 1, rows: 3, areas: ["a", "b", "c"] },         // 3 stacked
+    { id: "2x2",  cols: 2, rows: 2, areas: ["a b", "c d"] },          // 4 grid
+    { id: "1+3s", cols: 3, rows: 3, areas: ["a a b", "a a c", "a a d"] }, // 1 big + 3 sidebar
+    { id: "1+3b", cols: 3, rows: 2, areas: ["a a a", "b c d"] },      // 1 big top + 3 bottom
+    { id: "4h",   cols: 4, rows: 1, areas: ["a b c d"] },             // 4 across
+    { id: "1+4",  cols: 4, rows: 2, areas: ["a a b c", "a a d e"] },  // 1 big + 4
+    { id: "3x2",  cols: 3, rows: 2, areas: ["a b c", "d e f"] },      // 6 grid
+    { id: "1+5",  cols: 3, rows: 3, areas: ["a a b", "a a c", "d e f"] }, // 1 big + 5
+    { id: "2x3",  cols: 2, rows: 3, areas: ["a b", "c d", "e f"] },   // 6 tall
+    { id: "4x2",  cols: 4, rows: 2, areas: ["a b c d", "e f g h"] },  // 8 grid
+    { id: "1+6",  cols: 4, rows: 3, areas: ["a a a b", "a a a c", "d e f g"] }, // 1 big + 6
+    { id: "3x3",  cols: 3, rows: 3, areas: ["a b c", "d e f", "g h i"] }, // 9 grid
+    { id: "4x3",  cols: 4, rows: 3, areas: ["a b c d", "e f g h", "i j k l"] }, // 12 grid
+    { id: "4x4",  cols: 4, rows: 4, areas: ["a b c d", "e f g h", "i j k l", "m n o p"] }, // 16 grid
+  ];
+  const presetById = (id) => PRESETS.find(p => p.id === id) || PRESETS[0];
   function orderedLetters(areas) {
     const seen = [];
     areas.join(" ").split(/\s+/).forEach(t => { if (t && t !== "." && !seen.includes(t)) seen.push(t); });
     return seen;
   }
+  const cellCount = (p) => (p.areas ? orderedLetters(p.areas).length : 0);
+
   function applyLayout() {
-    const L = LAYOUTS[colsSel.value];
-    if (L) {
-      wall.style.gridTemplateColumns = `repeat(${L.cols},1fr)`;
-      wall.style.gridTemplateRows = `repeat(${L.rows},1fr)`;
-      wall.style.gridTemplateAreas = L.areas.map(r => `"${r}"`).join(" ");
-    } else {
-      const cols = colsSel.value === "auto" ? Math.ceil(Math.sqrt(state.slots.length || 1)) : parseInt(colsSel.value, 10);
+    const p = presetById(state.layout);
+    if (!p.areas) {   // auto
+      const cols = Math.ceil(Math.sqrt(state.slots.length || 1));
       wall.style.gridTemplateAreas = "";
       wall.style.gridTemplateRows = "";
       wall.style.gridTemplateColumns = "";
       wall.style.setProperty("--cols", cols);
+    } else {
+      wall.style.gridTemplateColumns = `repeat(${p.cols},1fr)`;
+      wall.style.gridTemplateRows = `repeat(${p.rows},1fr)`;
+      wall.style.gridTemplateAreas = p.areas.map(r => `"${r}"`).join(" ");
     }
+  }
+
+  // ---- Visual layout picker panel ----
+  function buildLayoutPanel() {
+    layoutPanel.innerHTML = "";
+    const groups = new Map();
+    for (const p of PRESETS) { const n = cellCount(p); if (!groups.has(n)) groups.set(n, []); groups.get(n).push(p); }
+    [...groups.keys()].sort((a, b) => a - b).forEach(n => {
+      const row = document.createElement("div"); row.className = "lp-group";
+      const lab = document.createElement("span"); lab.className = "lp-lab"; lab.textContent = n === 0 ? "Auto" : n;
+      row.appendChild(lab);
+      for (const p of groups.get(n)) row.appendChild(layoutIcon(p));
+      layoutPanel.appendChild(row);
+    });
+  }
+  function layoutIcon(p) {
+    const btn = document.createElement("button");
+    btn.className = "lp-icon" + (p.id === state.layout ? " active" : "");
+    btn.title = p.id;
+    const mini = document.createElement("div");
+    mini.className = "lp-mini";
+    if (!p.areas) {
+      mini.style.gridTemplateColumns = "repeat(3,1fr)";
+      mini.style.gridTemplateRows = "repeat(2,1fr)";
+      for (let i = 0; i < 6; i++) mini.appendChild(document.createElement("i"));
+    } else {
+      mini.style.gridTemplateColumns = `repeat(${p.cols},1fr)`;
+      mini.style.gridTemplateRows = `repeat(${p.rows},1fr)`;
+      mini.style.gridTemplateAreas = p.areas.map(r => `"${r}"`).join(" ");
+      for (const ltr of orderedLetters(p.areas)) { const c = document.createElement("i"); c.style.gridArea = ltr; mini.appendChild(c); }
+    }
+    btn.appendChild(mini);
+    btn.onclick = (e) => { e.stopPropagation(); selectLayout(p); };
+    return btn;
+  }
+  function selectLayout(p) {
+    state.layout = p.id;
+    const need = cellCount(p);
+    while (need > state.slots.length) addSlotSilent();   // top up tiles to fill the layout
+    save(); render(); buildLayoutPanel(); layoutPanel.hidden = true;
+  }
+  function addSlotSilent() {
+    const used = new Set(state.slots.map(s => s.slug));
+    const next = CARS.find(c => c.cls !== "Broadcast" && !used.has(c.slug)) || CARS[1];
+    state.slots.push({ id: slotSeq++, slug: next.slug, big: false });
   }
   function render() {
     applyLayout();
@@ -226,8 +291,8 @@
     // append new tiles, remove deleted ones, and rebuild the one iframe whose car changed.
     const existing = new Map([...wall.querySelectorAll(".tile")].map(t => [t.dataset.id, t]));
     const seen = new Set();
-    const _L = LAYOUTS[colsSel.value];
-    const _letters = _L ? orderedLetters(_L.areas) : null;
+    const _p = presetById(state.layout);
+    const _letters = _p.areas ? orderedLetters(_p.areas) : null;
     state.slots.forEach((slot, i) => {
       let tile = existing.get(String(slot.id));
       if (!tile) { tile = buildTile(slot); wall.appendChild(tile); }   // new tile only
@@ -326,18 +391,14 @@
     if (f < 0 || t < 0) return;
     const [m] = a.splice(f, 1); a.splice(t, 0, m); save(); render();
   }
-  function addTile() {
-    const used = new Set(state.slots.map(s => s.slug));
-    const next = CARS.find(c => c.cls !== "Broadcast" && !used.has(c.slug)) || CARS[1];
-    state.slots.push({ id: slotSeq++, slug: next.slug, big: false });
-    save(); render();
-  }
+  function addTile() { addSlotSilent(); save(); render(); }
 
   let toastT;
   function toast(msg) { const el = document.getElementById("toast"); el.textContent = msg; el.className = "toast show"; clearTimeout(toastT); toastT = setTimeout(() => el.className = "toast", 3000); }
 
   document.getElementById("addTile").onclick = addTile;
-  colsSel.addEventListener("change", () => { save(); render(); });
+  layoutBtn.onclick = (e) => { e.stopPropagation(); if (layoutPanel.hidden) buildLayoutPanel(); layoutPanel.hidden = !layoutPanel.hidden; };
+  document.addEventListener("click", (e) => { if (!layoutPanel.hidden && !layoutPanel.contains(e.target) && e.target !== layoutBtn) layoutPanel.hidden = true; });
   document.getElementById("full").onclick = () => { if (!document.fullscreenElement) wall.requestFullscreen?.(); else document.exitFullscreen?.(); };
   document.getElementById("clear").onclick = () => { if (confirm("Remove all tiles?")) { state.slots = []; save(); render(); } };
 
