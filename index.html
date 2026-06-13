@@ -306,8 +306,12 @@
         tile.insertBefore(f, tile.firstChild);
         tile.dataset.slug = slot.slug;
       }
+      // In a fixed layout, only the first N tiles fit its cells; hide the rest
+      // (they keep playing and return when you pick a bigger layout or Auto).
+      const _hidden = _letters ? (i >= _letters.length) : false;
+      tile.style.display = _hidden ? "none" : "";
       tile.style.order = i;
-      tile.style.gridArea = _letters ? (i < _letters.length ? _letters[i] : "") : "";
+      tile.style.gridArea = (!_hidden && _letters) ? _letters[i] : "";
       tile.classList.toggle("big", !!slot.big);
       tile.querySelector(".ln1").textContent = line1(car);
       tile.querySelector(".ln2").textContent = line2(car);
