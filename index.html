@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Le Mans Onboard Wall</title>
+<style>
+  :root {
+    --bg:#0a0c10; --panel:#14181f; --panel-2:#1c222c; --line:#2a313d;
+    --txt:#e7ecf2; --muted:#8b97a7; --accent:#3da9fc; --accent-2:#2ee6a6; --danger:#ff5c5c;
+    --gap:4px; --cols:3;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.4 "Segoe UI",system-ui,sans-serif;
+         display:flex; flex-direction:column; overflow:hidden; }
+
+  .toolbar { display:flex; align-items:center; gap:8px; padding:8px 10px; background:var(--panel);
+             border-bottom:1px solid var(--line); flex-wrap:wrap; z-index:10; }
+  .toolbar .brand { font-weight:700; letter-spacing:.3px; margin-right:6px; white-space:nowrap; }
+  .toolbar .brand span { color:var(--accent); }
+  .toolbar .spacer { flex:1; }
+  button { background:var(--panel-2); color:var(--txt); border:1px solid var(--line); padding:8px 11px;
+           border-radius:8px; cursor:pointer; white-space:nowrap; transition:background .12s,border-color .12s; }
+  button:hover { background:#29313d; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#05121f; font-weight:600; }
+  .cols-ctl { display:flex; align-items:center; gap:6px; color:var(--muted); }
+  select { background:var(--panel-2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 8px; }
+
+  .wall { flex:1; display:grid; gap:var(--gap); padding:var(--gap);
+          grid-template-columns:repeat(var(--cols),1fr); grid-auto-rows:1fr; background:#05070a; min-height:0; }
+  .wall.empty { display:flex; align-items:center; justify-content:center; }
+
+  .tile { position:relative; background:#000; border:1px solid var(--line); border-radius:8px;
+          overflow:hidden; min-height:0; min-width:0; }
+  .tile.big { grid-column:span 2; grid-row:span 2; }
+  .tile.dragover { outline:2px dashed var(--accent); outline-offset:-2px; }
+  .tile.audio-on { border-color:var(--accent-2); }
+  .tile iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#000; }
+
+  .tile .hdr { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:4px;
+               padding:5px 6px; background:linear-gradient(180deg,rgba(0,0,0,.82),rgba(0,0,0,0));
+               opacity:0; transition:opacity .15s; z-index:3; }
+  .tile:hover .hdr { opacity:1; }
+  .tile .hdr .grip { cursor:grab; color:#fff; opacity:.85; font-size:14px; padding:0 3px; user-select:none; }
+  .tile .hdr .pick { flex:1; min-width:0; max-width:64%; font-size:12px; padding:4px 6px;
+                     background:rgba(20,24,31,.94); color:#fff; border-radius:6px; }
+  .tile .hdr button { padding:3px 7px; font-size:12px; background:rgba(20,24,31,.85); line-height:1; }
+  .tile .hdr .rm:hover { background:var(--danger); border-color:var(--danger); color:#fff; }
+
+  .tile .label { position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,.62); color:#fff;
+                 padding:4px 9px; border-radius:7px; z-index:3; cursor:text; text-align:right;
+                 text-shadow:0 1px 2px #000; max-width:82%; border:1px solid rgba(255,255,255,.12); line-height:1.25; }
+  .tile .label .ln1 { display:block; font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile .label .ln2 { display:block; font-size:11px; font-weight:500; opacity:.88; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile .label .ln2:empty { display:none; }
+
+  .empty-state { text-align:center; color:var(--muted); max-width:560px; padding:24px; }
+  .empty-state h1 { color:var(--txt); font-size:22px; margin:0 0 8px; }
+
+  .toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--panel-2);
+           border:1px solid var(--line); padding:9px 14px; border-radius:8px; z-index:50;
+           box-shadow:0 8px 24px rgba(0,0,0,.5); opacity:0; transition:opacity .2s; pointer-events:none; }
+  .toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div class="brand">🏁 Le Mans <span>Onboard Wall</span></div>
+    <button class="primary" id="addTile" title="Add a tile (then pick a car from its dropdown)">➕ Add tile</button>
+    <div class="cols-ctl"><span>Layout</span>
+      <select id="cols">
+        <optgroup label="Grid">
+          <option value="auto">Auto</option>
+          <option value="1">1</option>
+          <option value="2">2 cols</option>
+          <option value="3" selected>3 cols</option>
+          <option value="4">4 cols</option>
+          <option value="5">5 cols</option>
+          <option value="6">6 cols</option>
+        </optgroup>
+        <optgroup label="Layouts">
+          <option value="twoup">2 · side by side</option>
+          <option value="stack">2 · stacked</option>
+          <option value="side4">4 · big + sidebar</option>
+          <option value="cine6">6 · 1 big + 5</option>
+          <option value="cine7">7 · 1 big + 6</option>
+        </optgroup>
+      </select>
+    </div>
+    <div class="spacer"></div>
+    <button id="full" class="ghost" title="Fullscreen the whole wall">⛶ Fullscreen</button>
+    <button id="clear" class="ghost" title="Remove all tiles">🗑 Clear</button>
+  </div>
+
+  <div id="wall" class="wall"></div>
+  <div id="toast" class="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+  const KEY = "streamwall.v3";
+  const BASE = "https://plus.fiawec.com/en/livestream/";
+
+  // ---- Catalog: every harvested onboard, by class. drivers = static line-up. ----
+  // url is the live onboard link; num/team/drivers feed the bottom-right label.
+  const CARS = [
+    { slug:"s-24-hours-of-le-mans-race-en-4ggw9", num:"", cls:"Broadcast", team:"World Feed (switch language in player)", drivers:[] },
+    { slug:"live-timing", num:"", cls:"Broadcast", team:"Live Timing & Map", drivers:[], url:"https://livetiming.fiawec.com/session/18130/live/map?autoplay=true&includeSeriesIds=396,409,410&trackCarLabel=NO&columns=LastLap,BestLap,Interval,Gap,PitCountAndLap,StrikingDistance&categoryBadges=true&unitSystem=speed:Mph,temperature:Celsius,pressure:Psi,volume:Liter" },
+
+    { slug:"s-n7-toyota-racing-24-hours-of-le-mans-2026-race-etro6", num:"7", cls:"Hypercar", team:"Toyota Racing", drivers:["Conway","Kobayashi","de Vries"] },
+    { slug:"s-n8-toyota-racing-24-hours-of-le-mans-2026-race-p5nxqp", num:"8", cls:"Hypercar", team:"Toyota Racing", drivers:["Buemi","Hartley","Hirakawa"] },
+    { slug:"s-n12-cadillac-hertz-team-jota-24-hours-of-le-mans-2026-race-0dz3fc", num:"12", cls:"Hypercar", team:"Cadillac Hertz Team JOTA", drivers:["Lynn","Stevens","Nato"] },
+    { slug:"s-n38-cadillac-hertz-team-jota-24-hours-of-le-mans-2026-race-ef0zdi", num:"38", cls:"Hypercar", team:"Cadillac Hertz Team JOTA", drivers:["Bourdais","Bamber","Aitken"] },
+    { slug:"s-n101-cadillac-wtr-24-hours-of-le-mans-2026-race-13zpy8", num:"101", cls:"Hypercar", team:"Cadillac Team WTR", drivers:["R. Taylor","J. Taylor","Albuquerque"] },
+    { slug:"s-n15-bmw-m-team-wrt-24-hours-of-le-mans-2026-race-ntbn4t", num:"15", cls:"Hypercar", team:"BMW M Team WRT", drivers:["Magnussen","Marciello","Vanthoor"] },
+    { slug:"s-n20-bmw-m-team-wrt-24-hours-of-le-mans-2026-race-j7eqc", num:"20", cls:"Hypercar", team:"BMW M Team WRT", drivers:["Frijns","Rast","van der Linde"] },
+    { slug:"s-n17-genesis-magma-racing-24-hours-of-le-mans-2026-race-x26jqd", num:"17", cls:"Hypercar", team:"Genesis Magma Racing", drivers:["Lotterer","Derani","Jaubert"] },
+    { slug:"s-n19-genesis-magma-racing-24-hours-of-le-mans-2026-race-4oyiak", num:"19", cls:"Hypercar", team:"Genesis Magma Racing", drivers:["Jaminet","Chatin","Juncadella"] },
+    { slug:"s-n35-alpine-endurance-team-24-hours-of-le-mans-2026-race-qlgcsb", num:"35", cls:"Hypercar", team:"Alpine Endurance Team", drivers:["da Costa","Milesi","Habsburg"] },
+    { slug:"s-n36-alpine-endurance-team-24-hours-of-le-mans-2026-race-e9jnrb", num:"36", cls:"Hypercar", team:"Alpine Endurance Team", drivers:["Makowiecki","Gounon","Martins"] },
+    { slug:"s-n50-ferrari-af-corse-24-hours-of-le-mans-2026-race-k1jt5", num:"50", cls:"Hypercar", team:"Ferrari AF Corse", drivers:["Fuoco","Nielsen","Molina"] },
+    { slug:"s-n51-ferrari-af-corse-24-hours-of-le-mans-2026-race-iv3zp", num:"51", cls:"Hypercar", team:"Ferrari AF Corse", drivers:["Pier Guidi","Calado","Giovinazzi"] },
+    { slug:"s-n83-af-corse-24-hours-of-le-mans-2026-race-tzjekr", num:"83", cls:"Hypercar", team:"AF Corse (Ferrari)", drivers:["Ye","Kubica","Hanson"] },
+    { slug:"s-n93-peugeot-totalenergies-24-hours-of-le-mans-2026-race-lajxi9", num:"93", cls:"Hypercar", team:"Peugeot TotalEnergies", drivers:["di Resta","Vandoorne","Cassidy"] },
+    { slug:"s-n94-peugeot-totalenergies-24-hours-of-le-mans-2026-race-a3cz6k", num:"94", cls:"Hypercar", team:"Peugeot TotalEnergies", drivers:["Duval","Jakobsen","Pourchaire"] },
+    { slug:"s-n007-aston-martin-thor-team-24-hours-of-le-mans-2026-race-iuprr", num:"007", cls:"Hypercar", team:"Aston Martin THOR Team", drivers:[] },
+    { slug:"s-n009-aston-martin-thor-team-24-hours-of-le-mans-2026-race-p793c8", num:"009", cls:"Hypercar", team:"Aston Martin THOR Team", drivers:[] },
+
+    { slug:"s-n14-tds-racing-24-hours-of-le-mans-2026-race-yjt70j", num:"14", cls:"LMP2", team:"TDS Racing", drivers:["Lutke","Beche","Estre"] },
+    { slug:"s-n28-idec-24-hours-of-le-mans-2026-race-ms6fd", num:"28", cls:"LMP2", team:"IDEC Sport", drivers:["Lafargue","Rinicella","van Uitert"] },
+    { slug:"s-n99-ao-by-tf-24-hours-of-le-mans-2026-race-0v1g0i", num:"99", cls:"LMP2", team:"AO by TF", drivers:["Hyett","Delétraz","Cameron"] },
+    { slug:"s-n222-united-autosport-24-hours-of-le-mans-2026-race-soki2x", num:"222", cls:"LMP2", team:"United Autosports", drivers:["Schneider","Hanley","Jarvis"] },
+
+    { slug:"s-n2-tf-sport-24-hours-of-le-mans-2026-race-wl9ptx", num:"2", cls:"LMGT3", team:"TF Sport (Corvette)", drivers:["Ibrahim","Ikhwan","Green"] },
+    { slug:"s-n10-garage-59-24-hours-of-le-mans-2026-race-viexkq", num:"10", cls:"LMGT3", team:"Garage 59 (McLaren)", drivers:["Au","Fleming","Kirchhöfer"] },
+    { slug:"s-n13-autosport-24-hours-of-le-mans-2026-race-d6ozv", num:"13", cls:"LMGT3", team:"13 Autosport (Corvette)", drivers:["Fidani","Kern","Bell"] },
+    { slug:"s-n27-heart-of-racing-team-24-hours-of-le-mans-2026-race-vl4j2d", num:"27", cls:"LMGT3", team:"Heart of Racing (Aston)", drivers:["James","Robichon","Drudi"] },
+    { slug:"s-n32-team-wrt-24-hours-of-le-mans-2026-race-5anvf", num:"32", cls:"LMGT3", team:"Team WRT (BMW)", drivers:["Leung","Gelael","Farfus"] },
+    { slug:"s-n33-tf-sport-24-hours-of-le-mans-2026-race-67raw", num:"33", cls:"LMGT3", team:"TF Sport (Corvette)", drivers:["Keating","Edgar","Catsburg"] },
+    { slug:"s-n34-racing-team-turkey-by-tf-sport-24-hours-of-le-mans-2026-race-8t1lk", num:"34", cls:"LMGT3", team:"Racing Team Turkey (Corvette)", drivers:["Dempsey","Yoluç","Eastwood"] },
+    { slug:"s-n54-vista-af-corse-24-hours-of-le-mans-2026-race-94y47t", num:"54", cls:"LMGT3", team:"Vista AF Corse (Ferrari)", drivers:["Flohr","Castellacci","Rigon"] },
+    { slug:"s-n58-garage-59-24-hours-of-le-mans-2026-race-hhtiu", num:"58", cls:"LMGT3", team:"Garage 59 (McLaren)", drivers:["West","Gehrsitz","Goethe"] },
+    { slug:"s-n69-team-wrt-24-hours-of-le-mans-2026-race-cl5f5", num:"69", cls:"LMGT3", team:"Team WRT (BMW)", drivers:["McIntosh","Thompson","Harper"] },
+    { slug:"s-n74-kessel-racing-24-hours-of-le-mans-2026-race-9gnzcg", num:"74", cls:"LMGT3", team:"Kessel Racing (Ferrari)", drivers:["Blattner","Patrese","Marschall"] },
+    { slug:"s-n77-proton-competition-24-hours-of-le-mans-2026-race-vv19ih", num:"77", cls:"LMGT3", team:"Proton Competition (Ford)", drivers:["Powell","Tuck","Priaulx"] },
+    { slug:"s-n79-iron-lynx-24-hours-of-le-mans-2026-race-eq2l1e", num:"79", cls:"LMGT3", team:"Iron Lynx (Mercedes)", drivers:["Zelger","Cressoni","Hodenius"] },
+    { slug:"s-n87-akkodis-asp-team-24-hours-of-le-mans-2026-race-d4eyq", num:"87", cls:"LMGT3", team:"Akkodis ASP (Lexus)", drivers:["Umbrarescu","Schmid","López"] },
+    { slug:"s-n88-proton-competition-24-hours-of-le-mans-2026-race-uymag7", num:"88", cls:"LMGT3", team:"Proton Competition (Ford)", drivers:["Gattuso","Levorato","Sargeant"] },
+    { slug:"s-n91-manthey-dk-engineering-24-hours-of-le-mans-2026-race-j127qt", num:"91", cls:"LMGT3", team:"Manthey (Porsche)", drivers:["Cottingham","Boguslavskiy","Güven"] },
+    { slug:"s-n92-the-bend-manthey-24-hours-of-le-mans-2026-race-3666n", num:"92", cls:"LMGT3", team:"The Bend Manthey (Porsche)", drivers:["Shahin","Pera","Lietz"] },
+  ];
+  CARS.forEach(c => { if (!c.url) c.url = BASE + c.slug; });   // explicit url wins (e.g. Live Timing)
+  const carBySlug = Object.fromEntries(CARS.map(c => [c.slug, c]));
+  const CLASS_ORDER = ["Broadcast", "Hypercar", "LMP2", "LMGT3"];
+
+  const wall = document.getElementById("wall");
+  const colsSel = document.getElementById("cols");
+
+  let state = load();
+  let slotSeq = state.slots.reduce((m, s) => Math.max(m, s.id), 0) + 1;
+
+  function load() {
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+    if (s && Array.isArray(s.slots)) { if (s.cols) colsSel.value = s.cols; return { cols: s.cols || "3", slots: s.slots, over: s.over || {} }; }
+    // first run: seed a starter grid of 6 cars
+    const seed = ["s-n7-toyota-racing-24-hours-of-le-mans-2026-race-etro6",
+      "s-n8-toyota-racing-24-hours-of-le-mans-2026-race-p5nxqp",
+      "s-n50-ferrari-af-corse-24-hours-of-le-mans-2026-race-k1jt5",
+      "s-n51-ferrari-af-corse-24-hours-of-le-mans-2026-race-iv3zp",
+      "s-n20-bmw-m-team-wrt-24-hours-of-le-mans-2026-race-j7eqc",
+      "s-n93-peugeot-totalenergies-24-hours-of-le-mans-2026-race-lajxi9"];
+    return { cols: "3", slots: seed.map((slug, i) => ({ id: i + 1, slug, big: false })), over: {} };
+  }
+  function save() { state.cols = colsSel.value; try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function carOf(slot) { return carBySlug[slot.slug] || CARS[0]; }
+  function line1(car) { return (car.num ? "N°" + car.num + " " : "") + car.team; }
+  function line2(car) {
+    const ov = state.over[car.slug];
+    const drv = ov !== undefined ? ov : (car.drivers || []).join(" · ");
+    return drv;
+  }
+
+  // ---- Render ----
+  // Named "feature" layouts using CSS grid-template-areas. Tiles map to the
+  // areas a,b,c… in order; the first (a) is the big one. Anything beyond the
+  // layout's cell count flows underneath.
+  const LAYOUTS = {
+    twoup: { cols: 2, rows: 1, areas: ["a b"] },
+    stack: { cols: 1, rows: 2, areas: ["a", "b"] },
+    side4: { cols: 3, rows: 3, areas: ["a a b", "a a c", "a a d"] },
+    cine6: { cols: 3, rows: 3, areas: ["a a b", "a a c", "d e f"] },
+    cine7: { cols: 4, rows: 3, areas: ["a a a b", "a a a c", "d e f g"] },
+  };
+  function orderedLetters(areas) {
+    const seen = [];
+    areas.join(" ").split(/\s+/).forEach(t => { if (t && t !== "." && !seen.includes(t)) seen.push(t); });
+    return seen;
+  }
+  function applyLayout() {
+    const L = LAYOUTS[colsSel.value];
+    if (L) {
+      wall.style.gridTemplateColumns = `repeat(${L.cols},1fr)`;
+      wall.style.gridTemplateRows = `repeat(${L.rows},1fr)`;
+      wall.style.gridTemplateAreas = L.areas.map(r => `"${r}"`).join(" ");
+    } else {
+      const cols = colsSel.value === "auto" ? Math.ceil(Math.sqrt(state.slots.length || 1)) : parseInt(colsSel.value, 10);
+      wall.style.gridTemplateAreas = "";
+      wall.style.gridTemplateRows = "";
+      wall.style.gridTemplateColumns = "";
+      wall.style.setProperty("--cols", cols);
+    }
+  }
+  function render() {
+    applyLayout();
+    wall.classList.toggle("empty", state.slots.length === 0);
+    if (state.slots.length === 0) { wall.innerHTML = '<div class="empty-state"><h1>No tiles</h1><p>Click <b>➕ Add tile</b>, then choose a car from its dropdown.</p></div>'; return; }
+    const ph = wall.querySelector(".empty-state"); if (ph) ph.remove();
+
+    // IMPORTANT: never re-insert an existing tile — moving an <iframe> in the
+    // DOM reloads it. Existing tiles stay put (ordered via CSS `order`); we only
+    // append new tiles, remove deleted ones, and rebuild the one iframe whose car changed.
+    const existing = new Map([...wall.querySelectorAll(".tile")].map(t => [t.dataset.id, t]));
+    const seen = new Set();
+    const _L = LAYOUTS[colsSel.value];
+    const _letters = _L ? orderedLetters(_L.areas) : null;
+    state.slots.forEach((slot, i) => {
+      let tile = existing.get(String(slot.id));
+      if (!tile) { tile = buildTile(slot); wall.appendChild(tile); }   // new tile only
+      seen.add(String(slot.id));
+      const car = carOf(slot);
+      if (tile.dataset.slug !== slot.slug) {            // rebuild iframe only when the car changes
+        const old = tile.querySelector("iframe"); if (old) old.remove();
+        const f = document.createElement("iframe");
+        f.src = car.url;
+        f.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+        tile.insertBefore(f, tile.firstChild);
+        tile.dataset.slug = slot.slug;
+      }
+      tile.style.order = i;
+      tile.style.gridArea = _letters ? (i < _letters.length ? _letters[i] : "") : "";
+      tile.classList.toggle("big", !!slot.big);
+      tile.querySelector(".ln1").textContent = line1(car);
+      tile.querySelector(".ln2").textContent = line2(car);
+      syncSelect(tile.querySelector(".pick"), slot);
+    });
+    existing.forEach((tile, id) => { if (!seen.has(id)) tile.remove(); });
+  }
+
+  let DROPDOWN_HTML = null;
+  function dropdownHtml() {
+    if (DROPDOWN_HTML) return DROPDOWN_HTML;
+    let html = "";
+    for (const cls of CLASS_ORDER) {
+      const cars = CARS.filter(c => c.cls === cls);
+      if (!cars.length) continue;
+      html += `<optgroup label="${escapeHtml(cls)}">`;
+      for (const c of cars) {
+        const drv = line2(c);
+        html += `<option value="${escapeHtml(c.slug)}">${escapeHtml(line1(c) + (drv ? "  —  " + drv : ""))}</option>`;
+      }
+      html += `</optgroup>`;
+    }
+    DROPDOWN_HTML = html;
+    return html;
+  }
+  function syncSelect(sel, slot) {
+    if (!sel) return;
+    if (!sel.dataset.filled) { sel.innerHTML = dropdownHtml(); sel.dataset.filled = "1"; }
+    sel.value = slot.slug;
+  }
+
+  function buildTile(slot) {
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    tile.dataset.id = slot.id;
+    tile.dataset.slug = "";
+
+    const hdr = document.createElement("div");
+    hdr.className = "hdr";
+    hdr.innerHTML =
+      `<span class="grip" title="Drag to rearrange">⠿</span>` +
+      `<select class="pick" title="Choose a car"></select>` +
+      `<button class="big" title="Make big / restore">⤢</button>` +
+      `<button class="fs" title="Fullscreen this tile">⛶</button>` +
+      `<button class="rm" title="Remove tile">✕</button>`;
+    tile.appendChild(hdr);
+
+    const label = document.createElement("div");
+    label.className = "label";
+    label.title = "Double-click to edit drivers";
+    label.innerHTML = `<span class="ln1"></span><span class="ln2"></span>`;
+    label.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      const car = carOf(slot);
+      const cur = line2(car);
+      const v = prompt("Drivers for " + line1(car) + " (separate with commas):", cur);
+      if (v !== null) { state.over[car.slug] = v.split(",").map(x => x.trim()).filter(Boolean).join(" · "); save(); render(); }
+    });
+    tile.appendChild(label);
+
+    const sel = hdr.querySelector(".pick");
+    sel.addEventListener("mousedown", (e) => e.stopPropagation());
+    sel.addEventListener("change", (e) => { e.stopPropagation(); slot.slug = sel.value; save(); render(); });
+
+    hdr.querySelector(".rm").onclick = (e) => { e.stopPropagation(); state.slots = state.slots.filter(s => s.id !== slot.id); save(); render(); };
+    hdr.querySelector(".big").onclick = (e) => { e.stopPropagation(); slot.big = !slot.big; save(); render(); };
+    hdr.querySelector(".fs").onclick = (e) => { e.stopPropagation(); tile.requestFullscreen?.(); };
+
+    const grip = hdr.querySelector(".grip");
+    grip.draggable = true;
+    grip.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", String(slot.id)); e.dataTransfer.effectAllowed = "move"; });
+    tile.addEventListener("dragover", (e) => { e.preventDefault(); tile.classList.add("dragover"); });
+    tile.addEventListener("dragleave", () => tile.classList.remove("dragover"));
+    tile.addEventListener("drop", (e) => { e.preventDefault(); tile.classList.remove("dragover"); reorder(parseInt(e.dataTransfer.getData("text/plain"), 10), slot.id); });
+    return tile;
+  }
+
+  function reorder(fromId, toId) {
+    if (fromId === toId) return;
+    const a = state.slots, f = a.findIndex(x => x.id === fromId), t = a.findIndex(x => x.id === toId);
+    if (f < 0 || t < 0) return;
+    const [m] = a.splice(f, 1); a.splice(t, 0, m); save(); render();
+  }
+  function addTile() {
+    const used = new Set(state.slots.map(s => s.slug));
+    const next = CARS.find(c => c.cls !== "Broadcast" && !used.has(c.slug)) || CARS[1];
+    state.slots.push({ id: slotSeq++, slug: next.slug, big: false });
+    save(); render();
+  }
+
+  let toastT;
+  function toast(msg) { const el = document.getElementById("toast"); el.textContent = msg; el.className = "toast show"; clearTimeout(toastT); toastT = setTimeout(() => el.className = "toast", 3000); }
+
+  document.getElementById("addTile").onclick = addTile;
+  colsSel.addEventListener("change", () => { save(); render(); });
+  document.getElementById("full").onclick = () => { if (!document.fullscreenElement) wall.requestFullscreen?.(); else document.exitFullscreen?.(); };
+  document.getElementById("clear").onclick = () => { if (confirm("Remove all tiles?")) { state.slots = []; save(); render(); } };
+
+  // ---- Built-in auto-start ----
+  // The "Start Le Mans Wall" launcher opens Chrome with cross-origin security
+  // relaxed, which lets the wall reach into each fiawec frame to accept cookies,
+  // click WATCH LIVE, and start the video muted. In a normal browser that access
+  // is blocked and harmlessly skipped (try/catch) — the page still works, you just
+  // click WATCH LIVE yourself.
+  function autoStart() {
+    document.querySelectorAll(".tile iframe").forEach(f => {
+      let doc;
+      try { doc = f.contentDocument || (f.contentWindow && f.contentWindow.document); } catch (e) { return; }
+      if (!doc) return;
+      try {
+        doc.querySelectorAll('button,[role="button"],a').forEach(b => {
+          const t = (b.textContent || "").trim().toLowerCase();
+          if (t.includes("accept cookies") || t.includes("accept all") || t.includes("watch live")) { try { b.click(); } catch (e) {} }
+        });
+        doc.querySelectorAll("video").forEach(v => { if (v.paused) { v.muted = true; const p = v.play(); if (p && p.catch) p.catch(() => {}); } });
+      } catch (e) {}
+    });
+  }
+  setInterval(autoStart, 1500);
+
+  render();
+})();
+</script>
+</body>
+</html>

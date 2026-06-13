@@ -1,0 +1,11 @@
+# never commit browser profiles (they contain login cookies / sessions)
+*profile/
+chrome-profile/
+LeMansWall/
+
+# tooling / scratch
+node_modules/
+_harvest/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Le Mans Wall Auto Start",
+  "version": "1.0.0",
+  "description": "Auto-starts FIA WEC+ livestream frames for the local video wall.",
+  "content_scripts": [
+    {
+      "matches": ["https://plus.fiawec.com/*"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["https://plus.fiawec.com/*"]
+}
